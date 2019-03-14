@@ -3,6 +3,8 @@ package com.walmart.warehouse.service;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.PriorityQueue;
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 
@@ -19,6 +21,7 @@ import com.walmart.warehouse.mapstruct.MapperutilityImpl;
 import com.walmart.warehouse.rest.model.AddProductModel;
 import com.walmart.warehouse.rest.model.Box;
 import com.walmart.warehouse.rest.model.CreateWarehouseModel;
+import com.walmart.warehouse.rest.model.GenerateWarehouseModel;
 import com.walmart.warehouse.rest.model.OrderProductModel;
 import com.walmart.warehouse.rest.model.Product;
 import com.walmart.warehouse.utility.Graph;
@@ -147,20 +150,31 @@ public class WarehouseService {
 	public List<BoxDO> packupProducts(OrderProductModel orderProductModel) {
 		// TODO Auto-generated method stub
 		List<BoxDO> boxes = this.boxRepository.findAll();
-		sort(boxes, 0, boxes.size()-1);
+		Queue<BoxDO> boxQueue = new PriorityQueue<BoxDO>(boxes.size(),new BoxComparator());
+		boxQueue.addAll(boxes);
+		boxes.clear();
 		Set<Product> products = orderProductModel.getProducts();
 		
 		for(Product product : products) {
 			Integer productKey = product.getProductName().hashCode();
+			Double productQuantity = product.getTotalQuantity();
 			ProductDO productDO = this.productRepository.findByProductKey(productKey);
-			Set<ProductDO> productDOs = new HashSet<ProductDO>();
-			for(BoxDO boxDO : boxes) {
-				//first fit ordered equivalent to best-fit
+			while(!boxQueue.isEmpty() && productQuantity > 0) {
+				//While Queue is not empty
+				BoxDO boxDO = boxQueue.poll();
 				if(productDO.getHeight() <= boxDO.getHeight() && productDO.getWidth() <= boxDO.getWidth() && productDO.getLength() <= boxDO.getLength()) {
-					//Possible to fit product in box
-					boxDO.setLength(boxDO.getLength() - productDO.getLength());
-					boxDO.setHeight(boxDO.getHeight() - productDO.getHeight());
-					boxDO.setWidth(boxDO.getWidth() - productDO.getWidth());
+					BoxDO box0 = boxDO.clone();
+					BoxDO box1 = boxDO.clone();//4,4,4
+					box1.setLength(box1.getLength() - productDO.getLength());//3,4,4
+					boxDO.setLength(boxDO.getLength() - box1.getLength());//1,4,4
+					BoxDO box2 = boxDO.clone();//1,4,4
+					box2.setWidth(box2.getWidth() - productDO.getWidth());//1,2,4
+					boxDO.setWidth(boxDO.getWidth() - box2.getWidth());//1,2,4
+					BoxDO box3 = boxDO.clone();//1,2,4
+					box3.setHeight(box3.getHeight() - productDO.getHeight());//1,2,1
+					boxDO.setHeight(box0.getHeight());
+					boxDO.setLength(box0.getLength());
+					boxDO.setWidth(box0.getWidth());
 					if(boxDO.getProducts() == null) {
 						Set<ProductDO> p = new HashSet<ProductDO>();
 						boxDO.setProducts(p);
@@ -168,11 +182,35 @@ public class WarehouseService {
 					else {
 						boxDO.getProducts().add(productDO);
 					}
-					break;
+					boxQueue.add(box1);
+					boxQueue.add(box2);
+					boxQueue.add(box3);
+					Boolean boxExists = false;
+					for(BoxDO boxDO2 : boxes) {
+						if(boxDO2.getBoxKey().equals(boxDO.getBoxKey())) {
+							boxExists = true;
+							Set<ProductDO> products1 = boxDO2.getProducts();
+							for(ProductDO productDO1 : products1) {
+								if(productDO1.getProductKey().equals(productDO.getProductKey())) {
+									productDO1.setTotalQuantity(productDO1.getTotalQuantity()+1);
+									break;
+								}
+							}
+							break;
+						}
+					}
+					if(boxExists == false)
+						boxes.add(boxDO);
+					productQuantity -= 1;
 				}
 			}
 		}
-		this.boxRepository.saveAll(boxes);
+		try {
+			this.boxRepository.deleteAll(boxes);
+		}catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
 		return boxes;
 	}
 	
@@ -189,38 +227,12 @@ public class WarehouseService {
 		}
 		return boxes;
 	}
-	
-	private Integer partition(List<BoxDO> arr, Integer low, Integer high) 
-    { 
-        Double pivot = arr.get(high).getVolume();  
-        Integer i = (low-1);  
-        for (Integer j=low; j<high; j++) 
-        { 
-            if (arr.get(j).getVolume() <= pivot) 
-            { 
-                i++; 
-                BoxDO temp = arr.get(i); 
-                arr.set(i, arr.get(j));
-                arr.set(j, temp);
-            } 
-        } 
-  
-        BoxDO temp = arr.get(i+1); 
-        arr.set(i+1, arr.get(high));
-        arr.set(high, temp);
-        return i+1; 
-    } 
-  
-  
 
-    private void sort(List<BoxDO> arr, Integer low, Integer high) 
-    { 
-        if (low < high) 
-        { 
-            Integer pi = partition(arr, low, high); 
-            sort(arr, low, pi-1); 
-            sort(arr, pi+1, high); 
-        } 
-    } 
+	public String generateWarehouse(GenerateWarehouseModel generateWarehouseModel) {
+		CreateWarehouseModel createWarehouseModel = new CreateWarehouseModel();
+		createWarehouseModel.generateWarehouse(generateWarehouseModel.getProductNames(), generateWarehouseModel.getStartLatitudes(), 
+				generateWarehouseModel.getStartLongitudes(), generateWarehouseModel.getEndLatitudes(), generateWarehouseModel.getEndLongitudes());
+		return createWarehouse(createWarehouseModel);
+	}
 
 }
